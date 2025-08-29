@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Collections.Generic;
 using MusicCreator.Functions;
+using MusicCreator.Models;
 
 namespace MusicCreator
 {
@@ -17,9 +18,10 @@ namespace MusicCreator
         public bool DoneResizing { get; set; } = false;
         public int CornersClicked { get; set; } = 0;
         public List<Point> BorderPoints { get; set; } = new();
-       
-        private IntPtr _hwnd;
+        public List<Point> NoteGrid { get; set; } = new();
 
+        private IntPtr _hwnd;
+        string filePAth;
         public MainWindow()
         {
             InitializeComponent();
@@ -32,6 +34,8 @@ namespace MusicCreator
                 Opacity = 0.7
             };
             Form.Background = imageBrush;
+
+            filePAth = "C:\\Users\\Mikae\\Desktop\\TEst.musicxml";
         }
 
         protected override void OnSourceInitialized(EventArgs e)
@@ -49,21 +53,22 @@ namespace MusicCreator
 
         private async void Form_MouseDown(object sender, MouseButtonEventArgs e)
         {
-           
-
 
             if (!DoneResizing) return;
             if (CornersClicked >= 4) return;
-           
+
+            //Scroll steps to bottom from top: 18
+            //Scroll Steps from left to right: 10
+            //Note blocks per side step: 3 (after 10 steps)
+            //Notes per block on 1/8 left to right: 8 st (24 per "Big Step")
+            //Notes per block Up to down: 12st   8 block 
+            //Note attribute above note 14, about 2.5 notes above
+            //Meter 6 notes in, about 2.5 notes above
+
 
             Point relativePos = e.GetPosition(this);
             Point screenPos = PointToScreen(relativePos);
 
-            ShowWindow(_hwnd, 0);
-            await ClickIntoGameAsync(screenPos, dropTopMost: true);           
-            //ScrollVertical(-3);
-            //ScrollHorizontal(3);
-            await IOHandler.ShiftScrollAsync(-10); //-4 = Scroll Höger
             if (CornersClicked == 0)
             {
                 BorderPoints.Add(screenPos);
@@ -84,55 +89,55 @@ namespace MusicCreator
                 BorderPoints.Add(screenPos);
                 MessageBox.Show("Done");
                 ShowWindow(_hwnd, 0);
-              
-                foreach (var item in BorderPoints)
-                    // NEW: mer robust spelklick
-                    await ClickIntoGameAsync(item, dropTopMost: true);
+                Compose();
             }
 
             CornersClicked++;
         }
-       
-
-        // NEW: robust fokus + click-through + ABSOLUTE click för spel
-        private async Task ClickIntoGameAsync(Point p, bool dropTopMost)
+        private void CreateNoteGrid()
         {
-            IntPtr gameHwnd = IOHandler.GetForegroundWindow(); // utgå från att spelet är aktivt
+            var LT = BorderPoints[0]; // left-top (center av hörn-rutan)
+            var RT = BorderPoints[1]; // right-top
+            var RB = BorderPoints[2]; // right-bottom
+            var LB = BorderPoints[3]; // left-bottom
 
-            if (dropTopMost) IOHandler.SetAlwaysOnTop(false);
+            int cols = 24; // horisontella rutor
+            int rows = 24; // vertikala rutor
 
-            IOHandler.EnableClickThrough();
-            IOHandler.ApplyStyleChanges();
+            NoteGrid.Clear();
 
-            // Dölj overlay så spelet garanterat får capture/fokus
-            //ShowWindow(_hwnd, SW_HIDE);
-            await Task.Delay(80);
+            // Stegvektorer längs överkanten och vänsterkanten
+            var dx = new Vector((RT.X - LT.X) / (cols - 1), (RT.Y - LT.Y) / (cols - 1));
+            var dy = new Vector((LB.X - LT.X) / (rows - 1), (LB.Y - LT.Y) / (rows - 1));
 
-            if (gameHwnd != IntPtr.Zero)
+            for (int j = 0; j < rows; j++)
             {
-                //FocusWindowRobust(gameHwnd); // NEW: stark fokusering (se helper nedan)
+                for (int i = 0; i < cols; i++)
+                {
+                    double x = LT.X + i * dx.X + j * dy.X;
+                    double y = LT.Y + i * dx.Y + j * dy.Y;
+                    NoteGrid.Add(new Point(x, y));
+                }
             }
+        }
+        private void Compose()
+        {
+            CreateNoteGrid();
+            MusicXML musicXML = MusicXMLFunctions.LoadFromFile(filePAth);
 
-            await Task.Delay(60);
+            foreach (var part in musicXML.Parts)
+            {
+                foreach (var measure in part.Measures)
+                {
+                    foreach (var note in measure.Notes)
+                    {
+                        IOHandler.SendAbsoluteClick();
+                    }
 
-            IOHandler.SendAbsoluteClick(p); // ABSOLUTE move + click
-            await Task.Delay(60);
-
-            // Visa overlay igen utan att sno fokus
-            //ShowWindow(_hwnd, SW_SHOWNOACTIVATE);
-
-            // Låt spelet behålla capture ett ögonblick innan vi stänger click-through
-            await Task.Delay(100);
-
-            IOHandler.DisableClickThrough();
-            IOHandler.ApplyStyleChanges();
-
-            if (dropTopMost) IOHandler.SetAlwaysOnTop(true);
+                }
+            }
         }
 
-       
-
-       
 
         private void Done_btn_Click(object sender, RoutedEventArgs e)
         {
