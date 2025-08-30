@@ -30,7 +30,7 @@ namespace MusicCreator
             {
                 ImageSource = new BitmapImage(new Uri(@"C:\Users\Mikae\source\repos\MusicCreator\MusicCreator\Images\FullB2-A0#.png")),
                 Stretch = Stretch.UniformToFill,
-                Opacity = 0.7
+                Opacity = 0.4
             };
             Form.Background = imageBrush;
 
@@ -88,52 +88,78 @@ namespace MusicCreator
                 BorderPoints.Add(screenPos);
                 MessageBox.Show("Done");
                 ShowWindow(_hwnd, 0);
-                Compose();
+                await Compose();
             }
 
             CornersClicked++;
         }
 
-        private void Compose()
+        private async Task Compose()
         {
-            const int ColumnsPerQuarter = 2;
             NoteHandler.CreateNoteGrid(BorderPoints);
-
-            MusicXML musicXML = MusicXMLFunctions.LoadFromFile(filePAth);
-
+            var musicXML = MusicXMLFunctions.LoadFromFile(filePAth);
+            
             foreach (var part in musicXML.Parts)
             {
                 foreach (var measure in part.Measures)
                 {
-                    int division = measure.Attributes?.Divisions ?? 2;
-                    foreach (var note in measure.Notes)
+                    int divisions = measure.Attributes?.Divisions ?? 2;
+
+                    var notes = measure.Notes;
+                    for (int i = 0; i < notes.Count; i++)
                     {
-                        List<Point> points = NoteHandler.SelectNoteAttribute(division, note);
-                        if(points != null && points.Count >= 2)
+                        var note = notes[i];
+
+                        // 1) REST: ändra inte meny, bara avancera
+                        if (note.Rest) // ← Använd EN konsekvent flagga! (se nedan)
                         {
-                            // Klicka på notvärdesmenyn
-                            IOHandler.SendAbsoluteClick(points[0]);
-                            Task.Delay(100).Wait(); // kort paus för att menyn ska hinna öppnas
-                            // Klicka på rätt notvärde
-                            IOHandler.SendAbsoluteClick(points[1]);
-                            Task.Delay(100).Wait(); // kort paus för att menyn ska hinna stängas
-                        }   
+                            var scrollR = NoteHandler.AdvanceRest(note, divisions);
+                            if ((scrollR > 0))
+                                await IOHandler.ShiftScrollAsync(-10);
+                            // TODO: om scrollR > 0, scrolla grid & NoteHandler.ResetColumn()
 
+                            continue;
+                        }
 
-                        var (point, scroll) = NoteHandler.GetNotePosition(note);
+                        // 2) MENYVAL för denna notlängd (ändra aldrig meny på rests)
+                        var menuClicks = NoteHandler.SelectNoteAttribute(divisions, note);
+                        if (menuClicks != null && menuClicks.Count >= 2)
+                        {
+                            IOHandler.SendAbsoluteClick(menuClicks[0]);
+                            Task.Delay(120).Wait();
+                            IOHandler.SendAbsoluteClick(menuClicks[1]);
+                            Task.Delay(120).Wait();
+                        }
 
-                        if (point != null)
-                            IOHandler.SendAbsoluteClick(point.Value);
+                        // 3) Bygg chord-grupp: note + efterföljande <chord/>-noter
+                        int j = i + 1;
+                        while (j < notes.Count && notes[j].Chord) j++;
 
+                        // Placera alla toner i samma kolumn
+                        for (int k = i; k < j; k++)
+                        {
+                            var nk = notes[k];
+                            var pos = NoteHandler.GetPositionNoAdvance(nk);
+                            if (pos != null) IOHandler.SendAbsoluteClick(pos.Value);
+                            Task.Delay(120).Wait();
+                        }
 
+                        // 4) Efter gruppen: avancera tiden en gång utifrån FÖRSTA notens duration
+                        var scrollN = NoteHandler.AdvanceByDuration(note, divisions);
+                        if(scrollN > 0)
+                            await IOHandler.ShiftScrollAsync(-10);
+                        
+
+                        // hoppa fram i loopen till första noten efter chord-gruppen
+                        i = j - 1;
                     }
-
                 }
             }
 
             this.Close();
-
         }
+
+
 
 
         private void Done_btn_Click(object sender, RoutedEventArgs e)
