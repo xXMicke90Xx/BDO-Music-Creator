@@ -125,6 +125,7 @@ namespace MusicCreator.Functions
                         note.Duration = (int?)noteEl.Element("duration") ?? 1;
                         note.Type = (string)noteEl.Element("type");
                         note.Chord = noteEl.Element("chord") != null;
+                        note.Rest = noteEl.Element("rest") != null;
                         note.Voice = (int?)noteEl.Element("voice") ?? 1;
 
                         // Lyrics

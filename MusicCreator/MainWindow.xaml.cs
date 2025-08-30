@@ -18,7 +18,6 @@ namespace MusicCreator
         public bool DoneResizing { get; set; } = false;
         public int CornersClicked { get; set; } = 0;
         public List<Point> BorderPoints { get; set; } = new();
-        public List<Point> NoteGrid { get; set; } = new();
 
         private IntPtr _hwnd;
         string filePAth;
@@ -94,48 +93,46 @@ namespace MusicCreator
 
             CornersClicked++;
         }
-        private void CreateNoteGrid()
-        {
-            var LT = BorderPoints[0]; // left-top (center av hörn-rutan)
-            var RT = BorderPoints[1]; // right-top
-            var RB = BorderPoints[2]; // right-bottom
-            var LB = BorderPoints[3]; // left-bottom
 
-            int cols = 24; // horisontella rutor
-            int rows = 24; // vertikala rutor
-
-            NoteGrid.Clear();
-
-            // Stegvektorer längs överkanten och vänsterkanten
-            var dx = new Vector((RT.X - LT.X) / (cols - 1), (RT.Y - LT.Y) / (cols - 1));
-            var dy = new Vector((LB.X - LT.X) / (rows - 1), (LB.Y - LT.Y) / (rows - 1));
-
-            for (int j = 0; j < rows; j++)
-            {
-                for (int i = 0; i < cols; i++)
-                {
-                    double x = LT.X + i * dx.X + j * dy.X;
-                    double y = LT.Y + i * dx.Y + j * dy.Y;
-                    NoteGrid.Add(new Point(x, y));
-                }
-            }
-        }
         private void Compose()
         {
-            CreateNoteGrid();
+            const int ColumnsPerQuarter = 2;
+            NoteHandler.CreateNoteGrid(BorderPoints);
+
             MusicXML musicXML = MusicXMLFunctions.LoadFromFile(filePAth);
 
             foreach (var part in musicXML.Parts)
             {
                 foreach (var measure in part.Measures)
                 {
+                    int division = measure.Attributes?.Divisions ?? 2;
                     foreach (var note in measure.Notes)
                     {
-                        IOHandler.SendAbsoluteClick();
+                        List<Point> points = NoteHandler.SelectNoteAttribute(division, note);
+                        if(points != null && points.Count >= 2)
+                        {
+                            // Klicka på notvärdesmenyn
+                            IOHandler.SendAbsoluteClick(points[0]);
+                            Task.Delay(100).Wait(); // kort paus för att menyn ska hinna öppnas
+                            // Klicka på rätt notvärde
+                            IOHandler.SendAbsoluteClick(points[1]);
+                            Task.Delay(100).Wait(); // kort paus för att menyn ska hinna stängas
+                        }   
+
+
+                        var (point, scroll) = NoteHandler.GetNotePosition(note);
+
+                        if (point != null)
+                            IOHandler.SendAbsoluteClick(point.Value);
+
+
                     }
 
                 }
             }
+
+            this.Close();
+
         }
 
 
