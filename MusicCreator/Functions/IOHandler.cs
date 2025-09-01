@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Media.Animation;
 
 namespace MusicCreator.Functions
 {
@@ -12,7 +13,7 @@ namespace MusicCreator.Functions
     {
         public static IntPtr _hwnd;
 
-       
+
 
         /// <summary>
         /// Simulated Shift down
@@ -78,33 +79,31 @@ namespace MusicCreator.Functions
         /// Scroll up and down. + for moving up, - for moving down
         /// </summary>
         /// <param name="clicks"></param>
-        public static void ScrollVertical(int clicks)
+        public static void ScrollVertical(int clicks, int stepDelayMs = 50)
         {
-            int delta = clicks * WHEEL_DELTA;
-            var inputs = new INPUT[]
+            int steps = Math.Abs(clicks);
+            if (steps == 0) return;
+
+            int delta = Math.Sign(clicks) * WHEEL_DELTA;              // +120 eller −120
+            uint udelta = unchecked((uint)delta);                     // viktigt för negativa
+
+            // Wheel stegvis
+            var wheel = new INPUT
             {
-        new INPUT { type = INPUT_MOUSE, U = new InputUnion {
-            mi = new MOUSEINPUT { mouseData = (uint)delta, dwFlags = MOUSEEVENTF_WHEEL }
-        } }
+                type = INPUT_MOUSE,
+                U = new InputUnion
+                {
+                    mi = new MOUSEINPUT { mouseData = udelta, dwFlags = MOUSEEVENTF_WHEEL }
+                }
             };
-            SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
-            Thread.Sleep(200);
-        }
-        /// <summary>
-        /// Scrolls left or right. + for moving left, - for moving right
-        /// </summary>
-        /// <param name="clicks"></param>
-        public static void ScrollHorizontal(int clicks)
-        {
-            int delta = clicks * WHEEL_DELTA; // >0 = höger, <0 = vänster
-            var inputs = new INPUT[]
+
+            for (int i = 0; i < steps; i++)
             {
-        new INPUT { type = INPUT_MOUSE, U = new InputUnion {
-            mi = new MOUSEINPUT { mouseData = (uint)delta, dwFlags = MOUSEEVENTF_HWHEEL }
-        } }
-            };
-            SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
+                SendInput(1, new[] { wheel }, Marshal.SizeOf(typeof(INPUT)));
+                Task.Delay(stepDelayMs).Wait();                        // ge appen tid; testa 40–80 ms
+            }
         }
+
         /// <summary>
         /// Scrolls left or right. + for moving left, - for moving right
         /// </summary>
@@ -265,7 +264,7 @@ namespace MusicCreator.Functions
 
 
         // Show/Foreground
-       
+
         [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -300,21 +299,21 @@ namespace MusicCreator.Functions
         public struct INPUT { public uint type; public InputUnion U; }
 
         [StructLayout(LayoutKind.Explicit)]
-        public  struct InputUnion
+        public struct InputUnion
         {
             [FieldOffset(0)] public MOUSEINPUT mi;
             [FieldOffset(0)] public KEYBDINPUT ki; // NEW: keyboard för Alt-nudge
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        public  struct MOUSEINPUT
+        public struct MOUSEINPUT
         {
             public int dx; public int dy; public uint mouseData;
             public uint dwFlags; public uint time; public IntPtr dwExtraInfo;
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        public  struct KEYBDINPUT
+        public struct KEYBDINPUT
         {
             public ushort wVk;
             public ushort wScan;

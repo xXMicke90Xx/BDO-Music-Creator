@@ -96,7 +96,7 @@ namespace MusicCreator.Models
 
     public class Note
     {
-        public bool Rest { get; set; }
+        public bool IsRest { get; set; }
         public Pitch Pitch { get; set; }
         public int Duration { get; set; }
         public string Type { get; set; } // quarter, half, etc.
