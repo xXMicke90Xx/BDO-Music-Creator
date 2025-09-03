@@ -87,7 +87,7 @@ namespace MusicCreator.Functions
                     {
                         measure.Attributes = new Attributes
                         {
-                            Divisions = (int?)attrEl.Element("divisions") ?? 1,
+                            Divisions = (int?)attrEl.Element("divisions") ?? 0,
                             Key = new Key
                             {
                                 Fifths = (int?)attrEl.Element("key")?.Element("fifths") ?? 0

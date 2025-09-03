@@ -99,28 +99,49 @@ namespace MusicCreator
             NoteHandler.CreateNoteGrid(BorderPoints);
             var musicXML = MusicXMLFunctions.LoadFromFile(filePAth);
 
+            int currentDivisions = 0;   // bär vidare
+            int currentBeats = 4, currentBeatType = 4; // om du vill använda senare
 
             foreach (var part in musicXML.Parts)
             {
+                // Nollställ per PART så att state inte “läcker” mellan stämmor
+                currentDivisions = 0;
+                currentBeats = 4; currentBeatType = 4;
                 foreach (var measure in part.Measures)
                 {
-                    int divisions = measure.Attributes?.Divisions ?? 2;
+                    // Uppdatera från <attributes> om finns
+                    if (measure.Attributes != null)
+                    {
+                        if (measure.Attributes.Divisions > 0)
+                            currentDivisions = measure.Attributes.Divisions;
+
+                        if (measure.Attributes.Time != null)
+                        {
+                            currentBeats = measure.Attributes.Time.Beats;
+                            currentBeatType = measure.Attributes.Time.BeatType;
+                        }
+                    }
+
+                    // SANE fallback om första takten saknar divisions av ngn anledning
+                    if (currentDivisions <= 0) currentDivisions = 8; // t.ex. quarter=8
+
                     var notes = measure.Notes;
 
                     for (int i = 0; i < notes.Count; i++)
                     {
                         var note = notes[i];
 
-                        // 1) REST → bara advance (horisontellt)
-                        if (note.IsRest) // använd en och samma flagga överallt: Rest eller IsRest
+                        // REST
+                        if (note.IsRest)
                         {
-                            int pagesH = NoteHandler.AdvanceRest(note, divisions);
+                            int pagesH = NoteHandler.AdvanceRest(note, currentDivisions);
                             if (pagesH > 0)
                             {
-                                // HOR SCROLL (Shift+hjul t.ex.)
+                                // ev. liten “säkring” mot korrupt data
+                                pagesH = Math.Min(pagesH, 8); // t.ex. max 8 sidor åt gången
                                 for (int p = 0; p < pagesH; p++)
                                 {
-                                    await IOHandler.ShiftScrollAsync(-10); // din implementation
+                                    await IOHandler.ShiftScrollAsync(-10);
                                     await Task.Delay(80);
                                 }
                                 NoteHandler.ResetColumn();
@@ -129,72 +150,46 @@ namespace MusicCreator
                             continue;
                         }
 
-                        // 2) Grupp: note + efterföljande <chord/>
+                        // CHORD-GRUPP
                         int j = i + 1;
                         while (j < notes.Count && notes[j].Chord) j++;
 
-                        // 3) Vertikal scroll: säkerställ att hela gruppen ryms innan klick
-                        //NoteHandler.EnsureVisibleForNotes(
-                        //    notes.Skip(i).Take(j - i),
-                        //    scrollUpOnePage: (pages) => { for (int p = 0; p < pages; p++) { IOHandler.ScrollVertical(6); System.Threading.Thread.Sleep(60); } },
-                        //    scrollDownOnePage: (pages) => { for (int p = 0; p < pages; p++) { IOHandler.ScrollVertical(-6); System.Threading.Thread.Sleep(60); } }
-                           
-                        //);
-                        // 3) Vertikal scroll: säkerställ att hela gruppen ryms innan klick
+                        // Vertikal synlighet
                         NoteHandler.EnsureVisibleForNotes(
                             notes.Skip(i).Take(j - i),
-                            scrollUpOnePage: (pages) =>
-                            {
-                                // 1 page = 24 rader = 8 notches (3 rader/notch)
-                                for (int p = 0; p < pages; p++)
-                                {
-                                    IOHandler.ScrollVertical(+6);
-                                    System.Threading.Thread.Sleep(80);
-                                }
-                            },
-                            scrollDownOnePage: (pages) =>
-                            {
-                                for (int p = 0; p < pages; p++)
-                                {
-                                    IOHandler.ScrollVertical(-6);
-                                    System.Threading.Thread.Sleep(80);
-                                }
-                            }
+                            scrollUpOnePage: (pages) => { for (int p = 0; p < pages; p++) { IOHandler.ScrollVertical(+6); System.Threading.Thread.Sleep(80); } },
+                            scrollDownOnePage: (pages) => { for (int p = 0; p < pages; p++) { IOHandler.ScrollVertical(-6); System.Threading.Thread.Sleep(80); } }
                         );
 
-                        // 4) MENYBYTE (bara på första noten i gruppen)
-                        var menuClicks = NoteHandler.SelectNoteAttribute(divisions, note);
+                        // MENYBYTE (valfritt)
+                        var menuClicks = NoteHandler.SelectNoteAttribute(currentDivisions, note);
                         if (menuClicks != null && menuClicks.Count >= 2)
                         {
-                            IOHandler.SendAbsoluteClick(menuClicks[0]);
-                            await Task.Delay(120);
-                            IOHandler.SendAbsoluteClick(menuClicks[1]);
-                            await Task.Delay(120);
+                            IOHandler.SendAbsoluteClick(menuClicks[0]); await Task.Delay(120);
+                            IOHandler.SendAbsoluteClick(menuClicks[1]); await Task.Delay(120);
                         }
 
-                        // 5) Klicka alla noter i gruppen (samma kolumn)
+                        // Klicka ackordet
                         for (int k = i; k < j; k++)
                         {
-                            
-                            var pos = NoteHandler.GetPositionNoAdvance(notes[k]);                           
+                            var pos = NoteHandler.GetClickPosition(notes[k], currentDivisions);
                             if (pos != null) IOHandler.SendAbsoluteClick(pos.Value);
                             await Task.Delay(120);
                         }
 
-                        // 6) Advance tid (horisontellt) en gång utifrån första notens duration
-                        int pagesAfter = NoteHandler.AdvanceByDuration(note, divisions);
+                        // Advance i tid (horisontellt)
+                        int pagesAfter = NoteHandler.AdvanceByDuration(note, currentDivisions);
                         if (pagesAfter > 0)
                         {
-                            // HOR SCROLL (till nästa sida) och reset kolumn
+                            pagesAfter = Math.Min(pagesAfter, 8); // liten säkring mot trasiga data
                             for (int p = 0; p < pagesAfter; p++)
                             {
-                                await IOHandler.ShiftScrollAsync(-10); // din implementation
+                                await IOHandler.ShiftScrollAsync(-10);
                                 await Task.Delay(80);
                             }
                             NoteHandler.ResetColumn();
                         }
-                       
-                        // 7) hoppa vidare
+
                         i = j - 1;
                     }
                 }
@@ -202,6 +197,8 @@ namespace MusicCreator
 
             this.Close();
         }
+
+
 
 
 

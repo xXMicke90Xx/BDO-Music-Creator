@@ -22,12 +22,14 @@ namespace MusicCreator.Functions
         private const int BottomOffsetRows = 3;
 
         private static readonly List<Point> NoteGrid = new(Cols * Rows);
-        private static int _currentCol = 0;
+
+        // --- Viktigt: kontinuerlig tidsposition mätt i 1/8-kolumner ---
+        private static double _currentColPos = 0.0;
 
         // Vertikal "sida": topprad (0-baserad i FullNotes-listan)
         private static int _currentTopRow = 0; // 0, 24, 48, ...
 
-        public static void ResetColumn() => _currentCol = 0;
+        public static void ResetColumn() => _currentColPos = 0.0;
         public static void ResetTopRow() => _currentTopRow = 0;
 
         // Senaste / aktuellt menyval (för att undvika onödiga meny-klick)
@@ -78,7 +80,7 @@ namespace MusicCreator.Functions
                 }
             }
 
-            _currentCol = 0;
+            _currentColPos = 0.0;
             _currentTopRow = 0;
         }
 
@@ -99,8 +101,8 @@ namespace MusicCreator.Functions
                 quarters == 0.25 ? "1/16" :
                 quarters == 0.125 ? "1/32" :
                 quarters == 0.0625 ? "1/64" :
-                quarters == 2 ? "1/2" :   // TODO: implementera menyväxling
-                quarters == 4 ? "1/1" :   // TODO: implementera menyväxling
+                quarters == 2 ? "1/2" :   // TODO
+                quarters == 4 ? "1/1" :   // TODO
                 "1/4";
 
             if (nextAttr == LastNoteAttribute) return null;
@@ -119,10 +121,10 @@ namespace MusicCreator.Functions
                 "1/4" => new Point(NoteGrid[13].X, NoteGrid[13].Y - notespaceY),
                 "1/8" => new Point(NoteGrid[13].X, NoteGrid[13].Y),
                 "1/16" => new Point(NoteGrid[13].X, NoteGrid[13].Y + notespaceY),
-                "1/32" => new Point(NoteGrid[13].X, NoteGrid[13].Y + notespaceY * 2),
+                "1/32" => new Point(NoteGrid[13].X, NoteGrid[13].Y + notespaceY * 2.5),
                 "1/64" => new Point(NoteGrid[13].X, NoteGrid[13].Y + notespaceY * 3),
-                "1/2" => new Point(NoteGrid[13].X, NoteGrid[13].Y - notespaceY * 2),  // TODO: anpassa
-                "1/1" => new Point(NoteGrid[13].X, NoteGrid[13].Y - notespaceY * 3),  // TODO: anpassa
+                "1/2" => new Point(NoteGrid[13].X, NoteGrid[13].Y - notespaceY * 2),  // TODO
+                "1/1" => new Point(NoteGrid[13].X, NoteGrid[13].Y - notespaceY * 3),  // TODO
                 _ => new Point(NoteGrid[13].X, NoteGrid[13].Y - notespaceY)
             };
 
@@ -130,87 +132,10 @@ namespace MusicCreator.Functions
         }
 
         /// <summary>
-        /// Hård nollställning: scrolla till absoluta toppen och nollställ state.
-        /// scrollUpNotches: en action som scrollar upp N notches (1 notch ≈ 3 rader).
+        /// Beräkna klickpunkt i mitten av sloten vid nuvarande tid (utan advance).
+        /// Använd denna för varje not i chord-gruppen innan advance.
         /// </summary>
-        public static void ForceScrollToAbsoluteTop(Action<int> scrollUpNotches)
-        {
-            // Hur många notches behövs uppskattat utifrån _currentTopRow?
-            int notchesToTop = (_currentTopRow + RowsPerNotch - 1) / RowsPerNotch;
-
-            // Lite säkerhetsmarginal (overscroll), t.ex. två sidor ≈ 6 notches
-            int safety = 1;
-            int total = Math.Max(0, notchesToTop + safety);
-
-            if (total > 0)
-                scrollUpNotches(total);
-
-            // Nollställ state (nu är vy = absolut toppen)
-            _currentTopRow = 0;
-            IsAtBottom = false;
-        }
-
-        /// <summary>
-        /// Säkerställ att en grupp noter (ackord) är synliga vertikalt.
-        /// Använder externa actions för faktisk scroll; uppdaterar _currentTopRow i 24-steg.
-        /// - Är vi på botten och behöver upp: hård reset till toppen.
-        /// </summary>
-        public static bool EnsureVisibleForNotes(
-            IEnumerable<Note> notes,
-            Action<int> scrollUpOnePage,    // t.ex. (n) => IOHandler.ScrollVertical(+3) * n
-            Action<int> scrollDownOnePage)  // t.ex. (n) => IOHandler.ScrollVertical(-3) * n
-        {
-            var rows = notes
-                .Where(n => !n.IsRest)
-                .Select(MapPitchToAbsoluteRowIndex)
-                .Where(r => r >= 0)
-                .ToList();
-
-            if (rows.Count == 0) return false;
-
-            int minAbs = rows.Min();
-            int maxAbs = rows.Max();
-
-            bool scrolled = false;
-
-            // LÄMNA BOTTEN: om vi är på bottensidan och behöver upp → hard reset
-            if (minAbs < _currentTopRow && IsAtBottomPage())
-            {
-                // Scrolla hela vägen upp + safety och nollställ state
-                ForceScrollToAbsoluteTop(notches =>
-                {
-                    for (int i = 0; i < notches; i++)
-                        scrollUpOnePage(1); // din scrollUpOnePage(1) ska scrolla en hel "sida" eller 3 notches internt
-                });
-                scrolled = true;
-            }
-
-            // Scrolla upp tills övertonen ryms (nu inte på bottensidan längre)
-            while (minAbs < _currentTopRow)
-            {
-                scrollUpOnePage(1); // en “sida” upp (24 rader)
-                _currentTopRow = Math.Max(0, _currentTopRow - Rows);
-                scrolled = true;
-            }
-
-            // Scrolla ned tills undertonen ryms
-            while (maxAbs >= _currentTopRow + Rows)
-            {
-                scrollDownOnePage(1); // en “sida” ned (24 rader)
-                int maxTop = Math.Max(0, FullNotes.Count - Rows);
-                _currentTopRow = Math.Min(maxTop, _currentTopRow + Rows);
-                scrolled = true;
-            }
-
-            return scrolled;
-        }
-
-        /// <summary>
-        /// Hämta position i NUVARANDE kolumn (ingen tidsadvance).
-        /// Returnerar null om notens pitch inte är synlig i aktuell vertikal vy.
-        /// Om vi är på nedersta sidan skjuts hela gridden ned 3 rader (Y-förskjutning).
-        /// </summary>
-        public static Point? GetPositionNoAdvance(Note note)
+        public static Point? GetClickPosition(Note note, int divisionsPerQuarter)
         {
             if (NoteGrid.Count != Cols * Rows)
                 throw new InvalidOperationException("NoteGrid is not built.");
@@ -221,17 +146,35 @@ namespace MusicCreator.Functions
             var relRow = MapToVisibleRow(absRow);
             if (relRow == null) return null;
 
-            int col = _currentCol.Clamp(0, Cols - 1);
-            var pos = NoteGrid[relRow.Value * Cols + col];
+            // slotWidth i 1/8-kolumner
+            double slotWidthCols = SlotWidthInCols(note, divisionsPerQuarter);
 
-            // Nederst: skjut hela gridden 3 rader ned
+            // center = vänsterkanten av sloten + halva sloten
+            const double eps = 1e-4; // liten bias vänster för att inte hamna i “nästa” cell
+            double centerColPos = _currentColPos + (slotWidthCols * 0.5) - eps;
+
+            // Interpolera mellan gridkolumnerna på aktuell rad
+            int col0 = (int)Math.Floor(centerColPos);
+            double t = centerColPos - col0;                    // 0..1 i cellen
+            int col1 = Math.Min(col0 + 1, Cols - 1);
+
+            int idx0 = relRow.Value * Cols + Math.Clamp(col0, 0, Cols - 1);
+            int idx1 = relRow.Value * Cols + Math.Clamp(col1, 0, Cols - 1);
+
+            var p0 = NoteGrid[idx0];
+            var p1 = NoteGrid[idx1];
+
+            var pos = new Point(
+                p0.X + (p1.X - p0.X) * t,
+                p0.Y + (p1.Y - p0.Y) * t
+            );
+
+            // Nedersta sidan: skjut gridden 3 rader ned
             if (IsAtBottomPage())
             {
-                IsAtBottom = true; // exponerat fält om du vill reagera i Compose()
-                // räkna ut Y-steg mellan två rader i samma kolumn
+                IsAtBottom = true;
                 int r0 = 0, r1 = Math.Min(1, Rows - 1);
-                double rowStepY = NoteGrid[r1 * Cols + col].Y - NoteGrid[r0 * Cols + col].Y;
-
+                double rowStepY = NoteGrid[r1 * Cols + col0].Y - NoteGrid[r0 * Cols + col0].Y;
                 pos.Y += rowStepY * BottomOffsetRows;
             }
 
@@ -239,20 +182,12 @@ namespace MusicCreator.Functions
         }
 
         /// <summary>
-        /// Hjälpare: true om nuvarande vy är nedersta sidan.
-        /// </summary>
-        private static bool IsAtBottomPage()
-        {
-            return _currentTopRow >= Math.Max(0, FullNotes.Count - Rows);
-        }
-
-        /// <summary>
-        /// Avancera tiden med notens längd (duration/divisions → kolumner).
-        /// Returnerar antal sidor att scrolla horisontellt (0 om ingen).
+        /// Avancera tiden med notens längd (duration/divisions → fraktionella kolumner).
+        /// Returnerar antal sidor (24 kolumner) att scrolla horisontellt.
         /// </summary>
         public static int AdvanceByDuration(Note note, int divisionsPerQuarter)
         {
-            int steps = StepsFromDuration(note, divisionsPerQuarter);
+            double steps = SlotWidthInCols(note, divisionsPerQuarter);
             return AdvanceColumns(steps);
         }
 
@@ -261,33 +196,38 @@ namespace MusicCreator.Functions
         /// </summary>
         public static int AdvanceRest(Note restNote, int divisionsPerQuarter)
         {
-            int steps = StepsFromDuration(restNote, divisionsPerQuarter);
+            double steps = SlotWidthInCols(restNote, divisionsPerQuarter);
             return AdvanceColumns(steps);
         }
 
         /// <summary>
-        /// Rå advance i kolumner; wrappar och returnerar antal "sidor" att scrolla.
+        /// Rå advance i (fraktionella) kolumner; wrappar och returnerar antal "sidor".
         /// </summary>
-        public static int AdvanceColumns(int steps)
+        public static int AdvanceColumns(double steps)
         {
-            if (steps < 1) steps = 1;
+            if (steps <= 0) steps = 0.0001; // undvik fastna
 
-            _currentCol += steps;
-            if (_currentCol <= Cols - 1) return 0;
+            _currentColPos += steps;
 
-            int pages = _currentCol / Cols;
-            _currentCol = _currentCol % Cols;
+            if (_currentColPos < Cols) return 0;
+
+            int pages = (int)Math.Floor(_currentColPos / Cols);
+            _currentColPos = _currentColPos % Cols;
             return pages;
         }
 
         // ======= Intern hjälp =======
 
-        private static int StepsFromDuration(Note note, int divisionsPerQuarter)
+        /// <summary>
+        /// duration/divisions → kvartar → kolumner (double).
+        /// 1/4 -> 2.0, 1/8 -> 1.0, 1/16 -> 0.5, 1/32 -> 0.25, 1/64 -> 0.125
+        /// </summary>
+        private static double SlotWidthInCols(Note note, int divisionsPerQuarter)
         {
             if (divisionsPerQuarter < 1) divisionsPerQuarter = 1;
             double quarters = (double)note.Duration / divisionsPerQuarter;
-            int steps = (int)Math.Round(quarters * ColumnsPerQuarter);
-            return Math.Max(1, steps);
+            double steps = quarters * ColumnsPerQuarter;
+            return Math.Max(0.0001, steps);
         }
 
         private static int MapPitchToAbsoluteRowIndex(Note note)
@@ -333,11 +273,73 @@ namespace MusicCreator.Functions
 
         private static int Clamp(this int v, int min, int max) => v < min ? min : (v > max ? max : v);
 
+        private static bool IsAtBottomPage()
+        {
+            return _currentTopRow >= Math.Max(0, FullNotes.Count - Rows);
+        }
+
         // (valfri) Om du i Compose vill justera “scroll upp från botten” manuellt i notches:
         public static int GetBottomScrollCompensationNotches(int rowsPerNotch = RowsPerNotch)
         {
             if (!IsAtBottomPage()) return 0;
             return (int)Math.Ceiling((double)BottomOffsetRows / Math.Max(1, rowsPerNotch)); // vanligtvis 1
+        }
+
+        // ===== Vertikal synlighets-hantering (oförändrat) =====
+        public static bool EnsureVisibleForNotes(
+            IEnumerable<Note> notes,
+            Action<int> scrollUpOnePage,    // t.ex. (n) => IOHandler.ScrollVertical(+6) * n
+            Action<int> scrollDownOnePage)  // t.ex. (n) => IOHandler.ScrollVertical(-6) * n
+        {
+            var rows = notes
+                .Where(n => !n.IsRest)
+                .Select(MapPitchToAbsoluteRowIndex)
+                .Where(r => r >= 0)
+                .ToList();
+
+            if (rows.Count == 0) return false;
+
+            int minAbs = rows.Min();
+            int maxAbs = rows.Max();
+
+            bool scrolled = false;
+
+            if (minAbs < _currentTopRow && IsAtBottomPage())
+            {
+                ForceScrollToAbsoluteTop(notches =>
+                {
+                    for (int i = 0; i < notches; i++)
+                        scrollUpOnePage(1);
+                });
+                scrolled = true;
+            }
+
+            while (minAbs < _currentTopRow)
+            {
+                scrollUpOnePage(1);
+                _currentTopRow = Math.Max(0, _currentTopRow - Rows);
+                scrolled = true;
+            }
+
+            while (maxAbs >= _currentTopRow + Rows)
+            {
+                scrollDownOnePage(1);
+                int maxTop = Math.Max(0, FullNotes.Count - Rows);
+                _currentTopRow = Math.Min(maxTop, _currentTopRow + Rows);
+                scrolled = true;
+            }
+
+            return scrolled;
+        }
+
+        public static void ForceScrollToAbsoluteTop(Action<int> scrollUpNotches)
+        {
+            int notchesToTop = (_currentTopRow + RowsPerNotch - 1) / RowsPerNotch;
+            int safety = 1;
+            int total = Math.Max(0, notchesToTop + safety);
+            if (total > 0) scrollUpNotches(total);
+            _currentTopRow = 0;
+            IsAtBottom = false;
         }
     }
 }
